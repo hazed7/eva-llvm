@@ -11,16 +11,21 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 
+#include "./parser/EvaParser.h"
+
+using syntax::EvaParser;
+
 class EvaLLVM {
 public:
-    EvaLLVM() {
+    EvaLLVM() : parser(std::make_unique<EvaParser>()) {
         moduleInit();
         setupExternFunctions();
     }
 
-    void exec(const std::string& progarm) {
+    void exec(const std::string& program) {
+        auto ast = parser->parse(program);
 
-        compile(/* ast */);
+        compile(ast);
 
         module->print(llvm::outs(), nullptr);
 
@@ -30,27 +35,46 @@ public:
     }
 
 private:
-    void compile(/* ast */) {
+    void compile(const Exp& ast) {
         fn = createFunction("main", llvm::FunctionType::get(builder->getInt32Ty(), false));
  
-        gen(/* ast */);
+        gen(ast);
 
         builder->CreateRet(builder->getInt32(0));
     }
     
-    llvm::Value* gen(/* exp */) {
-        // return builder->getInt32(42);
+    llvm::Value* gen(const Exp& exp) {
+        switch (exp.type) {
+            case ExpType::NUMBER:
+                return builder->getInt32(exp.number);
 
-        // strings:
-        auto str = builder->CreateGlobalStringPtr("Hello, world\n");
+            case ExpType::STRING:
+                return builder->CreateGlobalStringPtr(exp.string);
 
-        // call to printf:
-        auto printfFn = module->getFunction("printf");
+            case ExpType::SYMBOL:
+                // todo
+                return builder->getInt32(0);
 
-        // args:
-        std::vector<llvm::Value*> args{str};
+            case ExpType::LIST:
+                auto tag = exp.list[0];
 
-        return builder->CreateCall(printfFn, args);
+                if (tag.type == ExpType::SYMBOL) {
+                    auto op = tag.string;
+
+                    if (op == "printf") {
+                        auto printfFn = module->getFunction("printf");
+
+                        std::vector<llvm::Value*> args{};
+                        for (auto i = 1; i < exp.list.size(); i++)
+                            args.push_back(gen(exp.list[i]));
+
+                        return builder->CreateCall(printfFn, args);
+                    }
+                }
+        }
+
+        // Unreachable
+        return builder->getInt32(0);
     }
 
     void setupExternFunctions() {
@@ -104,6 +128,8 @@ private:
         // Create an IRBuilder with the LLVMContext
         builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
     }
+
+    std::unique_ptr<EvaParser> parser;
 
     llvm::Function* fn;
 
